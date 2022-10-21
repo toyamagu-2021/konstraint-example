@@ -1,0 +1,19 @@
+kind: Suite
+apiVersion: test.gatekeeper.sh/v1alpha1
+tests:
+- name: deny-prj-deny-default
+  template: template.yaml
+  constraint: test-constraint.yaml
+  cases:
+  - name: allowed-non-default-prj
+    object: "./tests/allowed/aplication-in-non-default-prj.yaml"
+    assertions:
+    - violations: no
+  - name: disallowed-default-prj
+    object: "./tests/disallowed/aplication-in-default-prj.yaml"
+    assertions:
+    - violations: yes
+  - name: disallowed-deny-prj
+    object: "./tests/disallowed/aplication-in-deny-prj.yaml"
+    assertions:
+    - violations: yes

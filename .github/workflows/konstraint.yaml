@@ -1,0 +1,98 @@
+name: 'Konstraint github actions'
+on: [pull_request]
+jobs:
+  konstraint-ci:
+    name: konstraint-ci
+    runs-on: ubuntu-latest
+    env:
+      GO_VERSION: "1.19.1"
+      KONSTRAINT_VERSION: "latest"
+      GATOR_VERSION: "v3.9.0"
+      CONFTEST_VERSION: "latest"
+      OPA_VERSION: "v0.44.0"
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go version
+      
+      - name: Setup Konstraint
+        run: go install github.com/plexsystems/konstraint@${{ env.KONSTRAINT_VERSION }}
+
+      - name: Setup Conftest
+        run: |
+          if [[ ${{ env.CONFTEST_VERSION }} = "latest" ]]; then
+            CONFTEST_VERSION=$(wget -O - "https://api.github.com/repos/open-policy-agent/conftest/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | cut -c 2-)
+          else
+            CONFTEST_VERSION=${{ env.CONFTEST_VERSION }}
+          fi
+          wget "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          tar xzf conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin
+        working-directory: /tmp
+      - run: conftest --version
+      - name: Conftest Fmt
+        run: conftest fmt .
+      - name: Conftest Test
+        run: conftest verify -p .
+
+      - name: Setup OPA
+        uses: open-policy-agent/setup-opa@v1
+        with:
+          version: ${{ env.OPA_VERSION }}
+
+      - name: OPA Test
+        id: opa-test
+        run: |
+          opa test . --ignore *.yaml
+          OPA_COVERAGE=`opa test . --ignore *.yaml  --coverage -v | jq .coverage`
+          echo "::set-output name=OPA_COVERAGE::${OPA_COVERAGE}"
+          echo "Test coverage is ${OPA_COVERAGE}"
+      - name: Coverage Report
+        uses: thollander/actions-comment-pull-request@v1
+        with:
+          message: |
+            ## OPA test coverage
+            ${{ steps.opa-test.outputs.OPA_COVERAGE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name: Konstraint Doc
+        run: konstraint doc .
+        working-directory: ./
+
+      - name: Konstraint Create
+        run: konstraint create .
+        working-directory: ./
+
+      - name: Check Diff
+        run: |
+          git diff
+          if ! `git diff --quiet`; then
+            echo "Error: Generete doc and yaml, and commit them before create MR."
+            exit 1
+          fi
+
+      - name: Setup Gator
+        run: |
+          GATOR_TAR_GZ=gator-${{ env.GATOR_VERSION }}-linux-amd64.tar.gz
+          curl -LO https://github.com/open-policy-agent/gatekeeper/releases/download/v3.9.0/${GATOR_TAR_GZ}
+          tar xzf ${GATOR_TAR_GZ} && rm ${GATOR_TAR_GZ}
+          sudo mv gator /usr/local/bin
+      - run: gator -v
+
+      - name: Gator Test
+        run: |
+          dirs=`find . -type f -name 'suite.yaml' | sed -r 's|/[^/]+$||' |sort |uniq`
+          for dir in ${dirs[@]}; do
+              echo "Gator verify dir: $dir"
+              gator verify ${dir}
+          done

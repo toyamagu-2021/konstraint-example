@@ -1,0 +1,17 @@
+kind: Suite
+apiVersion: test.gatekeeper.sh/v1alpha1
+tests:
+- name: deny-app-default-prj
+  template: template.yaml
+  constraint: constraint.yaml
+  cases:
+  - name: allowed-non-default-prj
+    object: "./tests/allowed/aplication-in-non-default-prj.yaml"
+    assertions:
+    - violations: no
+  - name: disallowed-default-prj
+    object: "./tests/disallowed/aplication-in-default-prj.yaml"
+    assertions:
+    - violations: yes
+    - message: "ArgoCD Application is not permitted to use default ArgoCD project."
+      violations: 1
